@@ -1,0 +1,11 @@
+node_modules/
+.DS_Store
+.env
+.env.*
+*.pem
+*credentials*.json
+service-account*.json
+.cursor/
+
+# Accidental scaffold folder
+{src/

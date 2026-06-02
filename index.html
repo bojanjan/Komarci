@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="mk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0a0f0d" />
+  <meta name="description" content="Сателес — карта на ризик од комарци и здравје на почвата за Кочанска Котлина" />
+  <title>Сателес · Кочанска Котлина</title>
+
+  <!-- MapLibre GL JS -->
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.js"></script>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="public/icon-192.png" />
+
+  <style>
+    /* ─── Reset & base ─────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --glass: rgba(10, 15, 13, 0.78);
+      --glass-border: rgba(255,255,255,0.08);
+      --text: #f0ede8;
+      --text-muted: rgba(240,237,232,0.5);
+      --radius: 24px;
+      --font: 'DM Sans', system-ui, sans-serif;
+    }
+
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0f0d; }
+
+    #map {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ─── Shared glass panel ────────────────────────── */
+    .glass {
+      background: var(--glass);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      color: var(--text);
+      font-family: var(--font);
+    }
+
+    .glass, .icon-btn, .pill, #risk-sheet, #opacity-control {
+      touch-action: manipulation;
+    }
+
+    /* ─── Loading screen ────────────────────────────── */
+    #loading-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 500;
+      background: #0a0f0d;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.6s ease;
+      font-family: var(--font);
+    }
+    #loading-screen.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .loading-mosquito {
+      font-size: 56px;
+      animation: mosquitoFly 2.5s ease-in-out infinite;
+      filter: drop-shadow(0 0 20px rgba(232, 64, 64, 0.3));
+    }
+    @keyframes mosquitoFly {
+      0%   { transform: translate(0, 0) rotate(-5deg); }
+      20%  { transform: translate(20px, -15px) rotate(5deg); }
+      40%  { transform: translate(-10px, -25px) rotate(-8deg); }
+      60%  { transform: translate(-25px, -10px) rotate(3deg); }
+      80%  { transform: translate(10px, -5px) rotate(-3deg); }
+      100% { transform: translate(0, 0) rotate(-5deg); }
+    }
+
+    /* ─── Search (top-left) ─────────────────────────── */
+    #search-wrap {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #search-input {
+      background: var(--glass);
+      border: 1px solid var(--glass-border);
+      border-radius: 22px;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 16px;
+      padding: 10px 16px;
+      width: 180px;
+      min-height: 44px;
+      outline: none;
+      transition: width 0.25s ease, border-color 0.2s;
+    }
+
+    #search-input::placeholder { color: var(--text-muted); }
+    #search-input:focus { width: 220px; border-color: rgba(255,255,255,0.25); }
+
+    /* ─── Geolocate + Share (top-right) ─────────────── */
+    #controls-right {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .icon-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: var(--glass);
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.2s;
+      color: var(--text);
+    }
+
+    .icon-btn:hover { background: rgba(255,255,255,0.18); }
+    .icon-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+    /* ─── Legend (bottom-left) ───────────────────────── */
+    #legend {
+      position: fixed;
+      bottom: 32px;
+      left: 16px;
+      z-index: 100;
+      padding: 12px 16px;
+      min-width: 220px;
+      max-width: 260px;
+      transition: opacity 0.2s;
+    }
+
+    #legend-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      user-select: none;
+    }
+
+    #legend-toggle span { transition: transform 0.2s; }
+    #legend.collapsed #legend-toggle span { transform: rotate(180deg); }
+    #legend.collapsed #legend-body { display: none; }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .legend-swatch {
+      width: 28px;
+      height: 10px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    .legend-divider {
+      border: none;
+      border-top: 1px solid var(--glass-border);
+      margin: 8px 0;
+    }
+
+    /* ─── Updated stamp (bottom-right) ──────────────── */
+    #updated-stamp {
+      position: fixed;
+      bottom: 32px;
+      right: 16px;
+      z-index: 100;
+      padding: 8px 14px;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 0.04em;
+      border-radius: 14px;
+    }
+
+    /* ─── Risk popup (desktop) ─────────────────────── */
+    .risk-popup {
+      background: var(--glass) !important;
+      border: 1px solid var(--glass-border) !important;
+      border-radius: 16px !important;
+      backdrop-filter: blur(16px) !important;
+      -webkit-backdrop-filter: blur(16px) !important;
+      padding: 12px 16px !important;
+      color: var(--text) !important;
+      font-family: var(--font) !important;
+      max-width: 240px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
+    }
+
+    .maplibregl-popup-content { background: transparent !important; box-shadow: none !important; padding: 0 !important; }
+    .maplibregl-popup-tip { display: none !important; }
+    .maplibregl-popup-close-button { color: var(--text-muted) !important; font-size: 18px !important; right: 10px !important; top: 8px !important; }
+
+    .popup-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .popup-value {
+      font-size: 28px;
+      font-weight: 600;
+      line-height: 1;
+      margin-bottom: 2px;
+    }
+
+    .popup-date {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+
+    /* ─── Bottom sheet (mobile risk card) ────────────── */
+    #risk-sheet {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 150;
+      border-radius: 24px 24px 0 0;
+      padding: 0 20px 28px;
+      transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+      max-height: 50vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    #risk-sheet.open { transform: translateY(0); }
+    #risk-sheet-handle {
+      text-align: center;
+      padding: 10px 0 8px;
+      cursor: pointer;
+    }
+    #risk-sheet-handle-bar {
+      width: 40px;
+      height: 4px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 2px;
+      margin: 0 auto;
+    }
+
+    /* ─── Opacity control ─────────────────────────────── */
+    #opacity-control {
+      position: fixed;
+      bottom: 70px;
+      right: 16px;
+      z-index: 100;
+      padding: 10px 14px;
+      width: 130px;
+    }
+    #opacity-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 2px;
+      outline: none;
+      margin-top: 6px;
+    }
+    #opacity-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--text);
+      cursor: pointer;
+      border: none;
+    }
+    #opacity-slider::-moz-range-thumb {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--text);
+      cursor: pointer;
+      border: none;
+    }
+
+    /* ─── User location marker ───────────────────────── */
+    .user-marker {
+      width: 16px;
+      height: 16px;
+      background: #4A90D9;
+      border: 2.5px solid #fff;
+      border-radius: 50%;
+      box-shadow: 0 0 0 0 rgba(74, 144, 217, 0.4);
+      animation: userPulse 2s infinite;
+    }
+    @keyframes userPulse {
+      0%   { box-shadow: 0 0 0 0 rgba(74, 144, 217, 0.5); }
+      70%  { box-shadow: 0 0 0 14px rgba(74, 144, 217, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(74, 144, 217, 0); }
+    }
+
+    /* ─── Toast notification ─────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 300;
+      padding: 12px 20px;
+      border-radius: 20px;
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+      background: rgba(10, 15, 13, 0.92);
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      max-width: 90vw;
+      text-align: center;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    #toast.visible { opacity: 1; }
+
+    /* ─── Mobile adjustments ─────────────────────────── */
+    @media (max-width: 480px) {
+      #search-input { width: 140px; }
+      #search-input:focus { width: 160px; }
+      .pill { padding: 8px 12px; font-size: 12px; }
+      #legend { bottom: 20px; max-width: calc(100vw - 32px); max-height: 45vh; overflow-y: auto; }
+      #updated-stamp { bottom: 20px; font-size: 10px; }
+      #opacity-control { bottom: 56px; width: 110px; padding: 8px 12px; }
+      .maplibregl-popup { display: none !important; }
+    }
+
+    /* ─── MapLibre attribution ───────────────────────── */
+    .maplibregl-ctrl-attrib { font-size: 9px !important; opacity: 0.5; }
+    .maplibregl-ctrl-bottom-right { bottom: 60px !important; }
+
+    /* ─── Fade-in on load ────────────────────────────── */
+    .ui-layer {
+      animation: fadeUp 0.4s ease both;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    #search-wrap    { animation-delay: 0.1s; }
+    #controls-right { animation-delay: 0.2s; }
+    #legend         { animation-delay: 0.25s; }
+    #updated-stamp  { animation-delay: 0.3s; }
+
+    /* ─── Demo mode banner ───────────────────────────── */
+    #demo-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 200;
+      padding: 10px 16px;
+      text-align: center;
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #fff;
+      background: rgba(232, 64, 64, 0.92);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Loading screen ─────────────────────────────────── -->
+<div id="loading-screen">
+  <div class="loading-mosquito">🦟</div>
+  <div style="margin-top:20px;font-size:15px;font-weight:600;color:var(--text);font-family:var(--font)">Satelles</div>
+  <div style="margin-top:6px;font-size:12px;color:var(--text-muted);font-family:var(--font)">Се вчитува карта…</div>
+</div>
+
+<!-- ── Demo mode banner (hidden when CONFIG.mosquitoTileUrl is set) ── -->
+<div id="demo-banner" class="ui-layer">
+  DEMO MODE — paste GEE tile URL in CONFIG to show real data
+</div>
+
+<!-- ── Map canvas ─────────────────────────────────────── -->
+<div id="map"></div>
+
+<!-- ── Village search (top-left) ─────────────────────── -->
+<div id="search-wrap" class="ui-layer">
+  <input id="search-input" type="search" placeholder="Пронајди село…" autocomplete="off" />
+</div>
+
+<!-- ── Geolocate + Share (top-right) ─────────────────── -->
+<div id="controls-right" class="ui-layer">
+  <button class="icon-btn" id="btn-geolocate" title="Моја локација" aria-label="Моја локација">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/><circle cx="12" cy="12" r="9" stroke-dasharray="4 2"/></svg>
+  </button>
+  <button class="icon-btn" id="btn-share" title="Сподели" aria-label="Сподели">
+    <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98"/></svg>
+  </button>
+</div>
+
+<!-- ── Legend (bottom-left) ──────────────────────────── -->
+<div id="legend" class="glass ui-layer">
+  <div style="font-size:15px;font-weight:600;margin-bottom:2px">Satelles</div>
+  <div style="font-size:11px;color:rgba(240,237,232,0.5);margin-bottom:4px">Активен мониторинг · Кочани</div>
+  <div id="refresh-info" style="font-size:11px;color:rgba(240,237,232,0.5);margin-bottom:4px"></div>
+  <div style="font-size:10px;color:#777;margin-bottom:10px">Картата се освежува двапати дневно.</div>
+  <hr class="legend-divider"/>
+  <div id="legend-toggle">
+    <span style="font-size:13px">Легенда</span>
+    <span>▾</span>
+  </div>
+  <div id="legend-body">
+    <div class="popup-label" style="margin-bottom:6px">Ризик од комарци</div>
+    <div class="legend-row">
+      <div class="legend-swatch" style="background:#d6f9d2"></div>
+      <span>Многу низок ризик · 0–20%</span>
+    </div>
+    <div class="legend-row">
+      <div class="legend-swatch" style="background:#3bb273"></div>
+      <span>Низок ризик · 20–40%</span>
+    </div>
+    <div class="legend-row">
+      <div class="legend-swatch" style="background:#ffd84d"></div>
+      <span>Среден ризик · 40–60%</span>
+    </div>
+    <div class="legend-row">
+      <div class="legend-swatch" style="background:#ff8a3d"></div>
+      <span>Висок ризик · 60–80%</span>
+    </div>
+    <div class="legend-row">
+      <div class="legend-swatch" style="background:#a000ff"></div>
+      <span>Критично · 80–100%</span>
+    </div>
+    <hr class="legend-divider"/>
+    <div style="font-size:10px;color:#777;line-height:1.4">
+      Satelles ги користи сателитските податоци (температура, вода, вегетација) за да процени услови за комарци. Овие информации се индикативни и не се медицинска дијагноза ниту официјално здравствено предупредување.
+    </div>
+  </div>
+</div>
+
+<!-- ── Opacity control (bottom-right, above stamp) ───── -->
+<div id="opacity-control" class="glass ui-layer" style="display:none">
+  <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:600">Слој</div>
+  <input type="range" id="opacity-slider" min="0" max="100" value="85" />
+</div>
+
+<!-- ── Updated stamp (bottom-right) ─────────────────── -->
+<div id="updated-stamp" class="glass ui-layer">
+  Ажурирано: <span id="update-date">—</span>
+</div>
+
+<!-- ── Bottom sheet (mobile risk display) ────────────── -->
+<div id="risk-sheet" class="glass">
+  <div id="risk-sheet-handle"><div id="risk-sheet-handle-bar"></div></div>
+  <div id="risk-sheet-content"></div>
+</div>
+
+<!-- ── Toast notification ────────────────────────────── -->
+<div id="toast"></div>
+
+<script>
+// ─────────────────────────────────────────────────────────
+// CONFIG
+// ─────────────────────────────────────────────────────────
+var CONFIG = {
+  center: [22.41, 41.92],
+  zoom: 11,
+  mosquitoTileUrl: 'https://earthengine.googleapis.com/v1/projects/code-kolektiv/maps/1a510d9bf283f2f7d71f554c63c6ba48-185dc045b6a88f41c545748f575f7879/tiles/{z}/{x}/{y}',
+  soilTileUrl: null,
+  updateDate: '2 јуни 2026',
+  kocaniBounds: { minLon: 22.20, minLat: 41.75, maxLon: 22.65, maxLat: 42.10 },
+  lastRefreshUtc: '2026-06-02T18:00:00Z',
+  riskBreaks: [20, 40, 60, 80]
+};
+
+var hasGEE = !!CONFIG.mosquitoTileUrl;
+
+(function () {
+  if (hasGEE) {
+    var demoBanner = document.getElementById('demo-banner');
+    if (demoBanner) demoBanner.style.display = 'none';
+  }
+})();
+
+// ─────────────────────────────────────────────────────────
+// MAP INIT
+// ─────────────────────────────────────────────────────────
+var map = new maplibregl.Map({
+  container: 'map',
+  preserveDrawingBuffer: true,
+  style: {
+    version: 8,
+    sources: {
+      'osm': {
+        type: 'raster',
+        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        attribution: '© OpenStreetMap contributors',
+        maxzoom: 19
+      }
+    },
+    layers: [{
+      id: 'osm-tiles',
+      type: 'raster',
+      source: 'osm',
+      paint: {
+        'raster-brightness-max': 0.55,
+        'raster-saturation': -0.3,
+        'raster-contrast': 0.15
+      }
+    }]
+  },
+  center: CONFIG.center,
+  zoom: CONFIG.zoom,
+  maxBounds: [[20.0, 40.5], [24.0, 43.0]],
+  attributionControl: false
+});
+
+map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+
+// ─────────────────────────────────────────────────────────
+// DEMO RISK LAYER (GeoJSON grid — fallback when no GEE)
+// ─────────────────────────────────────────────────────────
+var demoGridData = null;
+
+function makeDemoGrid(centerLng, centerLat, cols, rows, cellDeg) {
+  cols = cols || 18;
+  rows = rows || 12;
+  cellDeg = cellDeg || 0.02;
+  var features = [];
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var lng = centerLng - (cols / 2) * cellDeg + c * cellDeg;
+      var lat = centerLat - (rows / 2) * cellDeg + r * cellDeg;
+      var distFromWater = Math.sqrt(Math.pow((c - cols * 0.4) / cols, 2) + Math.pow((r - rows * 0.6) / rows, 2));
+      var mosquitoRisk = Math.max(0, Math.min(1, 0.9 - distFromWater * 2.5 + Math.random() * 0.15));
+      var soilHealth = Math.max(0, Math.min(1, 0.4 + (r / rows) * 0.5 + Math.random() * 0.1));
+      features.push({
+        type: 'Feature',
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [lng, lat], [lng + cellDeg, lat],
+            [lng + cellDeg, lat + cellDeg], [lng, lat + cellDeg], [lng, lat]
+          ]]
+        },
+        properties: {
+          mosquitoRisk: mosquitoRisk,
+          soilHealth: soilHealth,
+          updatedAt: CONFIG.updateDate,
+          mosquitoLabel: mosquitoRisk > 0.65 ? 'ВИСОК' : mosquitoRisk > 0.35 ? 'СРЕДЕН' : 'НИЗОК',
+          soilLabel: soilHealth > 0.65 ? 'ДОБРО' : soilHealth > 0.35 ? 'СРЕДНО' : 'ЛОШО'
+        }
+      });
+    }
+  }
+  return { type: 'FeatureCollection', features: features };
+}
+
+// ─────────────────────────────────────────────────────────
+// RISK HELPERS
+// ─────────────────────────────────────────────────────────
+
+function getRiskLabel(percent) {
+  if (percent >= 80) return 'Критично — големо присуство и можни жаришта.';
+  if (percent >= 60) return 'Висок ризик — очекувај повеќе комарци.';
+  if (percent >= 40) return 'Среден ризик — можно е засилено присуство.';
+  if (percent >= 20) return 'Низок ризик — следи ја состојбата.';
+  return 'Практично нема услови за комарци.';
+}
+
+function getRiskColor(percent) {
+  if (percent >= 80) return '#a000ff';
+  if (percent >= 60) return '#ff8a3d';
+  if (percent >= 40) return '#ffd84d';
+  if (percent >= 20) return '#3bb273';
+  return '#d6f9d2';
+}
+
+// ─────────────────────────────────────────────────────────
+// GEE TILE PIXEL READING — same palette as kocani-mosquito-gee.js
+// Fetches the raw GEE tile (not the blended map canvas) and
+// inverts the visualize() gradient (min 0, max 100).
+// ─────────────────────────────────────────────────────────
+
+var GEE_PALETTE_HEX = [
+  'f0f9e8', 'd6f9d2', 'a8e6a0', '3bb273',
+  '7dc44d', 'c0d236', 'ffd84d',
+  'ffbb3d', 'ff8a3d', 'f05a28',
+  'd42a6b', 'a000ff'
+];
+
+var geePaletteStops = [];
+var geeTileCache = {};
+
+(function buildGeePaletteStops() {
+  var i;
+  var hex;
+  var n = GEE_PALETTE_HEX.length;
+  for (i = 0; i < n; i++) {
+    hex = GEE_PALETTE_HEX[i];
+    geePaletteStops.push({
+      pct: (100 * i) / (n - 1),
+      r: parseInt(hex.substring(0, 2), 16),
+      g: parseInt(hex.substring(2, 4), 16),
+      b: parseInt(hex.substring(4, 6), 16)
+    });
+  }
+})();
+
+function colorDistSq(r, g, b, r2, g2, b2) {
+  var dr = r - r2;
+  var dg = g - g2;
+  var db = b - b2;
+  return dr * dr + dg * dg + db * db;
+}
+
+function rgbToRiskFromPalette(r, g, b, a) {
+  if (a !== undefined && a < 100) return -1;
+  if (r + g + b < 25) return -1;
+
+  var bestDist = 1e12;
+  var bestPct = 0;
+  var i;
+  var aStop;
+  var bStop;
+  var dr;
+  var dg;
+  var db;
+  var len2;
+  var t;
+  var pr;
+  var pg;
+  var pb;
+  var dist;
+
+  for (i = 0; i < geePaletteStops.length - 1; i++) {
+    aStop = geePaletteStops[i];
+    bStop = geePaletteStops[i + 1];
+    dr = bStop.r - aStop.r;
+    dg = bStop.g - aStop.g;
+    db = bStop.b - aStop.b;
+    len2 = dr * dr + dg * dg + db * db;
+    if (len2 < 1) continue;
+    t = ((r - aStop.r) * dr + (g - aStop.g) * dg + (b - aStop.b) * db) / len2;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    pr = aStop.r + t * dr;
+    pg = aStop.g + t * dg;
+    pb = aStop.b + t * db;
+    dist = colorDistSq(r, g, b, pr, pg, pb);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestPct = aStop.pct + t * (bStop.pct - aStop.pct);
+    }
+  }
+
+  return Math.round(Math.max(0, Math.min(100, bestPct)));
+}
+
+function lonLatToTilePixel(lon, lat, z) {
+  var n = Math.pow(2, z);
+  var x = (lon + 180) / 360 * n;
+  var latRad = lat * Math.PI / 180;
+  var y = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n;
+  var tileX = Math.floor(x);
+  var tileY = Math.floor(y);
+  var pixelX = Math.floor((x - tileX) * 256);
+  var pixelY = Math.floor((y - tileY) * 256);
+  if (pixelX < 0) pixelX = 0;
+  if (pixelX > 255) pixelX = 255;
+  if (pixelY < 0) pixelY = 0;
+  if (pixelY > 255) pixelY = 255;
+  return { tileX: tileX, tileY: tileY, pixelX: pixelX, pixelY: pixelY };
+}
+
+function loadGeeTileCanvas(url, callback) {
+  if (geeTileCache[url]) {
+    callback(null, geeTileCache[url]);
+    return;
+  }
+  var img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = function () {
+    var canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    canvas.getContext('2d').drawImage(img, 0, 0, 256, 256);
+    geeTileCache[url] = canvas;
+    callback(null, canvas);
+  };
+  img.onerror = function () {
+    callback(new Error('tile load failed'), null);
+  };
+  img.src = url;
+}
+
+function readGeeRiskAt(lon, lat, callback) {
+  if (!hasGEE || !CONFIG.mosquitoTileUrl) {
+    callback(-1);
+    return;
+  }
+
+  var z = Math.round(map.getZoom());
+  if (z < 9) z = 9;
+  if (z > 15) z = 15;
+
+  var tp = lonLatToTilePixel(lon, lat, z);
+  var url = CONFIG.mosquitoTileUrl
+    .replace('{z}', String(z))
+    .replace('{x}', String(tp.tileX))
+    .replace('{y}', String(tp.tileY));
+
+  loadGeeTileCanvas(url, function (err, canvas) {
+    if (err || !canvas) {
+      callback(-1);
+      return;
+    }
+    var ctx = canvas.getContext('2d');
+    var d = ctx.getImageData(tp.pixelX, tp.pixelY, 1, 1).data;
+    callback(rgbToRiskFromPalette(d[0], d[1], d[2], d[3]));
+  });
+}
+
+function readDemoRiskAt(lon, lat, isSoil) {
+  if (!demoGridData) return -1;
+  var features = demoGridData.features;
+  var i;
+  var coords;
+  var props;
+  for (i = 0; i < features.length; i++) {
+    coords = features[i].geometry.coordinates[0];
+    if (lon >= coords[0][0] && lon < coords[2][0] &&
+        lat >= coords[0][1] && lat < coords[2][1]) {
+      props = features[i].properties;
+      return Math.round((isSoil ? props.soilHealth : props.mosquitoRisk) * 100);
+    }
+  }
+  return -1;
+}
+
+// ─────────────────────────────────────────────────────────
+// TOAST
+// ─────────────────────────────────────────────────────────
+var toastTimer = null;
+
+function showToast(message) {
+  var el = document.getElementById('toast');
+  el.textContent = message;
+  clearTimeout(toastTimer);
+  el.classList.add('visible');
+  toastTimer = setTimeout(function () {
+    el.classList.remove('visible');
+  }, 4000);
+}
+
+// ─────────────────────────────────────────────────────────
+// BOTTOM SHEET (mobile)
+// ─────────────────────────────────────────────────────────
+
+function isMobile() {
+  return window.innerWidth <= 480;
+}
+
+function showBottomSheet(html) {
+  var sheet = document.getElementById('risk-sheet');
+  document.getElementById('risk-sheet-content').innerHTML = html;
+  sheet.classList.add('open');
+}
+
+function hideBottomSheet() {
+  document.getElementById('risk-sheet').classList.remove('open');
+}
+
+function initBottomSheetSwipe() {
+  var sheet = document.getElementById('risk-sheet');
+  var startY = 0;
+  var currentY = 0;
+
+  document.getElementById('risk-sheet-handle').addEventListener('click', function () {
+    hideBottomSheet();
+  });
+
+  sheet.addEventListener('touchstart', function (e) {
+    startY = e.touches[0].clientY;
+    currentY = startY;
+  }, { passive: true });
+
+  sheet.addEventListener('touchmove', function (e) {
+    currentY = e.touches[0].clientY;
+    var dy = currentY - startY;
+    if (dy > 0) {
+      sheet.style.transition = 'none';
+      sheet.style.transform = 'translateY(' + dy + 'px)';
+    }
+  }, { passive: true });
+
+  sheet.addEventListener('touchend', function () {
+    sheet.style.transition = '';
+    var dy = currentY - startY;
+    if (dy > 60) {
+      hideBottomSheet();
+    } else {
+      sheet.style.transform = '';
+      sheet.classList.add('open');
+    }
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+// SHARED RISK DISPLAY — click + geolocation
+// ─────────────────────────────────────────────────────────
+var currentPopup = null;
+
+function displayRiskPopup(lon, lat, pct, isSoil) {
+  if (currentPopup) currentPopup.remove();
+  hideBottomSheet();
+
+  if (pct < 0) {
+    showToast('Нема податоци за ризик на оваа локација.');
+    return;
+  }
+
+  var title = isSoil ? 'Здравје на почвата' : 'Ризик од комарци';
+  var color = isSoil
+    ? (pct > 65 ? '#3dba6f' : pct > 35 ? '#f5a623' : '#e84040')
+    : getRiskColor(pct);
+  var label = isSoil ? (pct > 65 ? 'ДОБРО' : pct > 35 ? 'СРЕДНО' : 'ЛОШО') : getRiskLabel(pct);
+
+  var html =
+    '<div class="risk-popup">' +
+      '<div class="popup-label">' + title + '</div>' +
+      '<div class="popup-value" style="color:' + color + '">' +
+        pct + '<span style="font-size:14px;font-weight:400">%</span>' +
+      '</div>' +
+      '<div style="font-size:12px;margin-top:4px;font-weight:500;line-height:1.3">' + label + '</div>' +
+      '<div class="popup-date">Ажурирано: ' + CONFIG.updateDate + '</div>' +
+    '</div>';
+
+  if (isMobile()) {
+    showBottomSheet(html);
+  } else {
+    currentPopup = new maplibregl.Popup({ closeButton: true, maxWidth: '240px' })
+      .setLngLat([lon, lat])
+      .setHTML(html)
+      .addTo(map);
+  }
+}
+
+function showRiskAt(lon, lat) {
+  if (hasGEE) {
+    readGeeRiskAt(lon, lat, function (pct) {
+      if (pct < 0) {
+        pct = readDemoRiskAt(lon, lat, false);
+      }
+      displayRiskPopup(lon, lat, pct, false);
+    });
+    return;
+  }
+
+  displayRiskPopup(lon, lat, readDemoRiskAt(lon, lat, false), false);
+}
+
+// ─────────────────────────────────────────────────────────
+// LAST REFRESH FORMATTING
+// ─────────────────────────────────────────────────────────
+function formatRefreshTime() {
+  if (!CONFIG.lastRefreshUtc) return 'Последно ажурирање: непознато';
+  var d = new Date(CONFIG.lastRefreshUtc);
+  if (isNaN(d.getTime())) return 'Последно ажурирање: непознато';
+
+  var now = new Date();
+  var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var refreshDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  var diffDays = Math.round((today.getTime() - refreshDay.getTime()) / 86400000);
+
+  var hh = d.getHours();
+  var mm = d.getMinutes();
+  var timeStr = (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
+
+  if (diffDays === 0) return 'Последно ажурирање: денес во ' + timeStr;
+  if (diffDays === 1) return 'Последно ажурирање: вчера во ' + timeStr;
+  return 'Последно ажурирање: ' + d.getDate() + '.' + (d.getMonth() + 1) + '.' + d.getFullYear() + ' во ' + timeStr;
+}
+
+// ─────────────────────────────────────────────────────────
+// 10 KM RADIUS CIRCLE
+// ─────────────────────────────────────────────────────────
+
+function makeCircleGeoJSON(lon, lat, radiusKm, steps) {
+  steps = steps || 64;
+  var coords = [];
+  var latRad = lat * Math.PI / 180;
+  for (var i = 0; i <= steps; i++) {
+    var angle = (i / steps) * 2 * Math.PI;
+    var dLat = (radiusKm / 111.32) * Math.sin(angle);
+    var dLon = (radiusKm / (111.32 * Math.cos(latRad))) * Math.cos(angle);
+    coords.push([lon + dLon, lat + dLat]);
+  }
+  return {
+    type: 'Feature',
+    geometry: { type: 'Polygon', coordinates: [coords] },
+    properties: {}
+  };
+}
+
+var userMarker = null;
+
+function drawRadiusCircle(lon, lat) {
+  var circle = makeCircleGeoJSON(lon, lat, 10);
+
+  if (map.getSource('radius-circle')) {
+    map.getSource('radius-circle').setData(circle);
+  } else {
+    map.addSource('radius-circle', { type: 'geojson', data: circle });
+    map.addLayer({
+      id: 'radius-circle-fill',
+      type: 'fill',
+      source: 'radius-circle',
+      paint: {
+        'fill-color': 'rgba(74, 144, 217, 0.06)'
+      }
+    });
+    map.addLayer({
+      id: 'radius-circle-border',
+      type: 'line',
+      source: 'radius-circle',
+      paint: {
+        'line-color': 'rgba(74, 144, 217, 0.4)',
+        'line-width': 1.5,
+        'line-dasharray': [4, 3]
+      }
+    });
+  }
+
+  if (userMarker) userMarker.remove();
+  var el = document.createElement('div');
+  el.className = 'user-marker';
+  userMarker = new maplibregl.Marker({ element: el })
+    .setLngLat([lon, lat])
+    .addTo(map);
+}
+
+function showRadiusSummary(lon, lat, riskPct) {
+  var color = getRiskColor(riskPct);
+  var label = getRiskLabel(riskPct);
+  var html =
+    '<div style="text-align:center;padding:4px 0">' +
+      '<div class="popup-label">Твојата локација · 10km радиус</div>' +
+      '<div class="popup-value" style="color:' + color + ';font-size:36px;margin:8px 0 4px">' +
+        riskPct + '<span style="font-size:16px;font-weight:400">%</span> Ризик' +
+      '</div>' +
+      '<div style="font-size:13px;margin-top:6px;font-weight:500;line-height:1.3;color:var(--text)">' + label + '</div>' +
+      '<div class="popup-date" style="margin-top:8px">Ажурирано: ' + CONFIG.updateDate + '</div>' +
+    '</div>';
+  showBottomSheet(html);
+}
+
+// ─────────────────────────────────────────────────────────
+// LOADING SCREEN
+// ─────────────────────────────────────────────────────────
+var loadingDismissed = false;
+
+function dismissLoading() {
+  if (loadingDismissed) return;
+  loadingDismissed = true;
+  var el = document.getElementById('loading-screen');
+  if (el) {
+    el.classList.add('hidden');
+    setTimeout(function () { el.style.display = 'none'; }, 700);
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// OPACITY FADE-IN + SLIDER
+// ─────────────────────────────────────────────────────────
+var geeTargetOpacity = 0.85;
+var geeCurrentOpacity = 0;
+var fadeInStarted = false;
+
+function startOpacityFadeIn() {
+  if (fadeInStarted || !hasGEE) return;
+  fadeInStarted = true;
+
+  var interval = setInterval(function () {
+    geeCurrentOpacity += 0.04;
+    if (geeCurrentOpacity >= geeTargetOpacity) {
+      geeCurrentOpacity = geeTargetOpacity;
+      clearInterval(interval);
+    }
+    if (map.getLayer('mosquito-gee-layer')) {
+      map.setPaintProperty('mosquito-gee-layer', 'raster-opacity', geeCurrentOpacity);
+    }
+  }, 30);
+}
+
+function initOpacitySlider() {
+  if (!hasGEE) return;
+  document.getElementById('opacity-control').style.display = '';
+
+  var slider = document.getElementById('opacity-slider');
+  slider.addEventListener('input', function () {
+    var val = parseInt(slider.value, 10) / 100;
+    geeCurrentOpacity = val;
+    geeTargetOpacity = val;
+    if (map.getLayer('mosquito-gee-layer')) {
+      map.setPaintProperty('mosquito-gee-layer', 'raster-opacity', val);
+    }
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+// AUTO-GEOLOCATION ON LOAD
+// ─────────────────────────────────────────────────────────
+var userLocation = null;
+
+function autoGeolocate() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    function (pos) {
+      var lon = pos.coords.longitude;
+      var lat = pos.coords.latitude;
+      var b = CONFIG.kocaniBounds;
+      if (lon < b.minLon || lon > b.maxLon || lat < b.minLat || lat > b.maxLat) {
+        return;
+      }
+      userLocation = [lon, lat];
+      map.flyTo({ center: [lon, lat], zoom: 13, duration: 1200 });
+
+      drawRadiusCircle(lon, lat);
+
+      map.once('idle', function () {
+        readGeeRiskAt(lon, lat, function (risk) {
+          if (risk < 0) risk = readDemoRiskAt(lon, lat, false);
+          if (risk < 0) risk = 0;
+          showRadiusSummary(lon, lat, risk);
+        });
+      });
+    },
+    function () { /* silently fail */ },
+    { timeout: 8000 }
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// MAP LOAD
+// ─────────────────────────────────────────────────────────
+
+var loadingTimeout = setTimeout(function () { dismissLoading(); }, 10000);
+
+map.on('load', function () {
+  demoGridData = makeDemoGrid(CONFIG.center[0], CONFIG.center[1]);
+
+  map.addSource('risk-grid', { type: 'geojson', data: demoGridData });
+
+  map.addLayer({
+    id: 'mosquito-layer',
+    type: 'fill',
+    source: 'risk-grid',
+    paint: {
+      'fill-color': [
+        'interpolate', ['linear'], ['get', 'mosquitoRisk'],
+        0.0, 'rgba(255,220,0,0)',
+        0.3, 'rgba(255,180,0,0.35)',
+        0.6, 'rgba(232,100,0,0.6)',
+        1.0, 'rgba(232,40,40,0.82)'
+      ],
+      'fill-outline-color': 'rgba(0,0,0,0.05)'
+    }
+  });
+
+  map.addLayer({
+    id: 'soil-layer',
+    type: 'fill',
+    source: 'risk-grid',
+    layout: { visibility: 'none' },
+    paint: {
+      'fill-color': [
+        'interpolate', ['linear'], ['get', 'soilHealth'],
+        0.0, 'rgba(220,40,40,0.75)',
+        0.5, 'rgba(245,166,35,0.6)',
+        1.0, 'rgba(61,186,111,0.75)'
+      ],
+      'fill-outline-color': 'rgba(0,0,0,0.05)'
+    }
+  });
+
+  if (hasGEE) {
+    map.addSource('mosquito-gee', { type: 'raster', tiles: [CONFIG.mosquitoTileUrl], tileSize: 256 });
+    map.addLayer({
+      id: 'mosquito-gee-layer',
+      type: 'raster',
+      source: 'mosquito-gee',
+      paint: { 'raster-opacity': 0 }
+    });
+    map.setLayoutProperty('mosquito-layer', 'visibility', 'none');
+    map.setLayoutProperty('mosquito-gee-layer', 'visibility', 'visible');
+  } else {
+    map.setLayoutProperty('mosquito-layer', 'visibility', 'visible');
+  }
+  map.setLayoutProperty('soil-layer', 'visibility', 'none');
+
+  document.getElementById('update-date').textContent = CONFIG.updateDate;
+
+  var refreshEl = document.getElementById('refresh-info');
+  if (refreshEl) refreshEl.textContent = formatRefreshTime();
+
+  initClickPopup();
+  initManualGeolocate();
+  initShare();
+  initSearch();
+  initLegend();
+  initKeyboard();
+  initOpacitySlider();
+  initBottomSheetSwipe();
+
+  autoGeolocate();
+});
+
+map.once('idle', function () {
+  clearTimeout(loadingTimeout);
+  dismissLoading();
+  startOpacityFadeIn();
+});
+
+// ─────────────────────────────────────────────────────────
+// CLICK → showRiskAt
+// ─────────────────────────────────────────────────────────
+function initClickPopup() {
+  map.on('click', function (e) {
+    showRiskAt(e.lngLat.lng, e.lngLat.lat);
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+// MANUAL GEOLOCATE BUTTON (Kočani-only)
+// ─────────────────────────────────────────────────────────
+function initManualGeolocate() {
+  document.getElementById('btn-geolocate').addEventListener('click', function () {
+    if (!navigator.geolocation) {
+      showToast('Не можеме да ја земеме твојата локација. Провери ги дозволите за локација.');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        var lon = pos.coords.longitude;
+        var lat = pos.coords.latitude;
+        var b = CONFIG.kocaniBounds;
+        if (lon < b.minLon || lon > b.maxLon || lat < b.minLat || lat > b.maxLat) {
+          showToast('Satelles моментално работи само за Кочани. Поддршката за други региони доаѓа подоцна.');
+          return;
+        }
+        userLocation = [lon, lat];
+        map.flyTo({ center: [lon, lat], zoom: 13, duration: 800 });
+        drawRadiusCircle(lon, lat);
+
+        map.once('idle', function () {
+          readGeeRiskAt(lon, lat, function (risk) {
+            if (risk < 0) risk = readDemoRiskAt(lon, lat, false);
+            if (risk < 0) risk = 0;
+            showRadiusSummary(lon, lat, risk);
+          });
+        });
+      },
+      function () {
+        showToast('Не можеме да ја земеме твојата локација. Провери ги дозволите за локација.');
+      },
+      { timeout: 10000 }
+    );
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+// SHARE (WhatsApp + Viber)
+// ─────────────────────────────────────────────────────────
+function initShare() {
+  document.getElementById('btn-share').addEventListener('click', function () {
+    var url = encodeURIComponent(window.location.href);
+    var msg = encodeURIComponent('Провери ја картата за ризик од комарци во Кочанска Котлина: ');
+
+    if (navigator.share) {
+      navigator.share({ title: 'Сателес — Кочани', url: window.location.href });
+    } else {
+      var menu = document.createElement('div');
+      menu.style.cssText = 'position:fixed;top:70px;right:16px;z-index:200;display:flex;flex-direction:column;gap:8px';
+      menu.innerHTML =
+        '<a href="https://wa.me/?text=' + msg + url + '" target="_blank" class="glass icon-btn" style="width:auto;padding:10px 16px;border-radius:20px;text-decoration:none;font-family:var(--font);font-size:13px">\uD83D\uDCAC WhatsApp</a>' +
+        '<a href="viber://forward?text=' + msg + url + '" target="_blank" class="glass icon-btn" style="width:auto;padding:10px 16px;border-radius:20px;text-decoration:none;font-family:var(--font);font-size:13px">\uD83D\uDCF1 Viber</a>';
+      document.body.appendChild(menu);
+      setTimeout(function () { menu.remove(); }, 4000);
+    }
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+// VILLAGE SEARCH
+// ─────────────────────────────────────────────────────────
+function initSearch() {
+  var input = document.getElementById('search-input');
+  var timeout;
+
+  input.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    clearTimeout(timeout);
+    var q = input.value.trim();
+    if (!q) return;
+
+    fetch('https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(q) + '&countrycodes=mk&format=json&limit=1')
+      .then(function (r) { return r.json(); })
+      .then(function (results) {
+        if (results.length) {
+          map.flyTo({ center: [parseFloat(results[0].lon), parseFloat(results[0].lat)], zoom: 13, duration: 800 });
+          input.blur();
+        }
+      });
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+// LEGEND TOGGLE
+// ─────────────────────────────────────────────────────────
+function initLegend() {
+  document.getElementById('legend-toggle').addEventListener('click', function () {
+    document.getElementById('legend').classList.toggle('collapsed');
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+// KEYBOARD SHORTCUTS (desktop)
+// ─────────────────────────────────────────────────────────
+function initKeyboard() {
+  document.addEventListener('keydown', function (e) {
+    if (e.target.tagName === 'INPUT') return;
+    if (e.key === '+' || e.key === '=') map.zoomIn();
+    if (e.key === '-') map.zoomOut();
+    if (e.key === 'ArrowLeft')  map.panBy([-80, 0]);
+    if (e.key === 'ArrowRight') map.panBy([80, 0]);
+    if (e.key === 'ArrowUp')    map.panBy([0, -80]);
+    if (e.key === 'ArrowDown')  map.panBy([0, 80]);
+  });
+}
+</script>
+</body>
+</html>

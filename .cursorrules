@@ -1,0 +1,80 @@
+# Satelles — Cursor AI Rules
+# Mosquito risk + soil health map for Kočani Valley, North Macedonia
+
+## Project Context
+Satelles is a freemium public-good map. Two layers: mosquito breeding risk (red scale)
+and soil health (green scale). Target users: farmers, municipalities, NGOs in Macedonia.
+Mobile-first. No login. No ads. No friction.
+
+## Tech Stack
+- MapLibre GL JS (open source map renderer)
+- OpenStreetMap base tiles (free)
+- Google Earth Engine raster overlays (risk tiles via GEE tile URL or COG)
+- Vanilla JS or Vite + vanilla (no React — keeps bundle tiny for mobile)
+- Cloudflare Pages (free hosting)
+- PWA manifest (Add to Home Screen, no app store)
+
+## Architecture Rules
+1. One HTML file entry point: index.html
+2. Map fills 100% of viewport — no header, no sidebar, no footer
+3. All UI floats on top, semi-transparent dark panels (rgba(0,0,0,0.7))
+4. Layer switcher: three pill buttons top-center [Mosquito | Soil | Both]
+5. Bottom-left: collapsible color legend
+6. Top-right: geolocate + share buttons (WhatsApp & Viber deep links)
+7. Top-left: village name search (simple geocoder)
+8. Bottom-right: "Updated [date]" trust stamp
+9. Click/tap on map cell: popup with risk score + last updated date
+
+## Layers
+### Mosquito Risk Layer
+- Source: Google Earth Engine export or tile endpoint
+- Color ramp: 0=transparent → 1=yellow → 0.6=orange → 1=red
+- Formula: risk = water_presence × temp_window × days_since_flood × proximity_to_settlement
+- GEE datasets: COPERNICUS/S1_GRD (SAR water), MODIS/061/MOD11A1 (LST), ECMWF/ERA5_LAND/HOURLY
+
+### Soil Health Layer
+- Source: existing GEE processing (Sentinel-2 NDVI, NDMI, NDWI)
+- Color ramp: 0=red → 0.5=yellow → 1=green
+
+## Coding Standards
+- Mobile-first CSS. Touch targets ≥ 44px
+- No login, no cookies banner, no modals on load
+- Default language: Macedonian (mk). Use data-i18n attributes for future i18n
+- Keyboard shortcuts on desktop: L = cycle layers, +/- = zoom, arrows = pan
+- Hover tooltips on desktop, tap popups on mobile
+- Keep JS files small and modular: map.js, layers.js, ui.js, geocoder.js
+
+## File Structure
+```
+satelles/
+├── index.html          # Entry point
+├── manifest.json       # PWA manifest
+├── sw.js               # Service worker (offline cache)
+├── src/
+│   ├── map.js          # MapLibre init + base map
+│   ├── layers.js       # GEE tile layer management
+│   ├── ui.js           # Pill switcher, legend, popups
+│   └── geocoder.js     # Village name search
+├── public/
+│   ├── icon-192.png    # PWA icon
+│   └── icon-512.png    # PWA icon
+└── styles/
+    └── main.css        # All styles
+```
+
+## GEE Integration Pattern
+GEE tiles are served as XYZ tile URLs from a GEE App or Cloud Run function:
+```
+https://earthengine.googleapis.com/v1/projects/{project}/maps/{mapId}/tiles/{z}/{x}/{y}
+```
+For MVP: use static exported GeoTIFF or pre-rendered tile set from GEE.
+For production: deploy a small Cloud Run function that refreshes tiles weekly.
+
+## DO NOT build
+- Login / accounts / email gate
+- Dashboard, profile, settings
+- Notification popups on first visit
+- Analytics overlays, chatbot widgets
+- Language picker (browser handles it)
+- "Rate us" / newsletter modals
+- App store install banners
